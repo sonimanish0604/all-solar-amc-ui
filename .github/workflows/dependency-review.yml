@@ -1,0 +1,71 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run repo-owned dependency review
+        id: dependency-review-run
+        continue-on-error: true
+        env:
+          GIT_DIFF_BASE: ${{ github.event.pull_request.base.sha }}
+          GIT_DIFF_HEAD: ${{ github.event.pull_request.head.sha }}
+          REPORT_DIR: ${{ github.workspace }}/dependency-review-reports
+        run: python3 scripts/security/review_dependency_changes.py
+
+      - name: Upload dependency review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-review-reports
+          path: dependency-review-reports
+
+      - name: Publish dependency review summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUMMARY_FILE="${GITHUB_WORKSPACE}/dependency-review-reports/summary.md"
+          if [[ -f "${SUMMARY_FILE}" ]]; then
+            cat "${SUMMARY_FILE}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Enforce dependency review exit code
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXIT_FILE="${GITHUB_WORKSPACE}/dependency-review-reports/exit_code.txt"
+          SUMMARY_FILE="${GITHUB_WORKSPACE}/dependency-review-reports/summary.md"
+          if [[ ! -f "${EXIT_FILE}" ]]; then
+            echo "Missing ${EXIT_FILE}"
+            exit 1
+          fi
+          if [[ -f "${SUMMARY_FILE}" ]]; then
+            cat "${SUMMARY_FILE}"
+          fi
+          if [[ "$(cat "${EXIT_FILE}")" != "0" ]]; then
+            echo "Dependency review reported a blocking manifest or lockfile policy violation."
+            exit 1
+          fi

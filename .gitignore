@@ -1,0 +1,48 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.packages
+build/
+
+# FlutterFlow / generated local artifacts
+flutter_export_environment.sh
+
+# Android
+**/android/.gradle/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+**/android/local.properties
+**/android/key.properties
+**/*.jks
+**/*.keystore
+
+# iOS / macOS
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/ephemeral/
+**/ios/Pods/
+**/ios/.symlinks/
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+
+# Web build outputs
+**/web_build/
+
+# Test / coverage
+coverage/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Windows metadata
+*:Zone.Identifier
