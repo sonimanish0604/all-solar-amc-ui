@@ -24,6 +24,12 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is used for the demo voice reading flow.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is used to capture demo note, meter, and serial photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is used to choose demo note, meter, and serial images.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
