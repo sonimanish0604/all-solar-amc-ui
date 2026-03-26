@@ -40,7 +40,7 @@ jobs:
           )
 
           for path in "${blocked_paths[@]}"; do
-            if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+            if git cat-file -e "HEAD:$path" 2>/dev/null; then
               echo "Do not commit Firebase client configuration: $path"
               echo "Materialize it locally or in CI from environment secrets instead."
               exit 1
