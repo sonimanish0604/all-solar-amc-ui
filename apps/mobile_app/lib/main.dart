@@ -10,12 +10,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_options.dart';
 
 const _demoSeenKey = 'demo_seen';
 const _demoImageBase64 = 'ZGVtby1pbWFnZQ==';
+const _maxUploadBytes = 1536 * 1024;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -226,6 +228,7 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
   DemoInputMode _selectedInputMode = DemoInputMode.image;
   DemoCaptureResult? _result;
   VoiceRecordingDebug? _recordingDebug;
+  SelectedImageDebug? _selectedImageDebug;
   String? _error;
   String? _infoMessage;
   bool _isLoading = false;
@@ -264,6 +267,7 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
       _isLoading = true;
       _result = null;
       _recordingDebug = null;
+      _selectedImageDebug = null;
       _error = null;
       _infoMessage = null;
     });
@@ -312,7 +316,9 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
     try {
       file = await _imagePicker.pickImage(
         source: source,
-        imageQuality: 92,
+        imageQuality: 80,
+        maxWidth: 1600,
+        maxHeight: 1600,
       );
     } catch (error) {
       if (!mounted) {
@@ -337,27 +343,73 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
     }
 
     setState(() {
-      _isLoading = true;
       _result = null;
       _recordingDebug = null;
+      _selectedImageDebug = null;
       _error = null;
       _infoMessage = null;
     });
 
     try {
       final bytes = await file.readAsBytes();
+      if (bytes.length > _maxUploadBytes) {
+        throw Exception(
+          'The selected image is ${(bytes.length / (1024 * 1024)).toStringAsFixed(2)} MB after compression. Please choose a smaller image or retake the photo.',
+        );
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedImageDebug = SelectedImageDebug(
+          filePath: file!.path,
+          fileName: _extractFileName(file.path),
+          contentType: _guessImageContentType(file.path),
+          byteLength: bytes.length,
+          bytes: bytes,
+          source: source,
+        );
+        _infoMessage = source == ImageSource.camera
+            ? 'Review the captured image before sending it to the public ${_selectedType.pathSegment} endpoint.'
+            : 'Review the selected image before sending it to the public ${_selectedType.pathSegment} endpoint.';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+      });
+    }
+  }
+
+  Future<void> _sendSelectedImage() async {
+    final image = _selectedImageDebug;
+    if (image == null) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _result = null;
+      _recordingDebug = null;
+      _error = null;
+      _infoMessage = 'Uploading image to the public ${_selectedType.pathSegment} endpoint...';
+    });
+
+    try {
       final result = await _apiClient.analyzeCapturedImage(
         captureType: _selectedType,
-        imageBase64: base64Encode(bytes),
-        imageContentType: _guessImageContentType(file.path),
-        fileName: _extractFileName(file.path),
+        imageBase64: base64Encode(image.bytes),
+        imageContentType: image.contentType,
+        fileName: image.fileName,
       );
       if (!mounted) {
         return;
       }
       setState(() {
         _result = result;
-        _infoMessage = source == ImageSource.camera
+        _infoMessage = image.source == ImageSource.camera
             ? 'Live camera photo was sent to the public ${_selectedType.pathSegment} endpoint.'
             : 'Selected image was sent to the public ${_selectedType.pathSegment} endpoint.';
       });
@@ -374,6 +426,34 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _shareSelectedImage() async {
+    final image = _selectedImageDebug;
+    if (image == null) {
+      return;
+    }
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final sharePath = '${tempDir.path}/${image.fileName}';
+      final shareFile = File(sharePath);
+      await shareFile.writeAsBytes(image.bytes, flush: true);
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(sharePath, mimeType: image.contentType)],
+          text: 'Debug capture exported from the All Solar AMC demo app.',
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = 'Unable to share the selected image: $error';
+      });
     }
   }
 
@@ -399,6 +479,7 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
       _isLoading = true;
       _result = null;
       _recordingDebug = null;
+      _selectedImageDebug = null;
       _error = null;
       _infoMessage = null;
     });
@@ -485,6 +566,7 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
       _isLoading = true;
       _isRecording = false;
       _result = null;
+      _selectedImageDebug = null;
       _error = null;
       _infoMessage = 'Uploading microphone audio to the demo voice API...';
     });
@@ -630,6 +712,7 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
                         _selectedInputMode = selection.first;
                         _result = null;
                         _recordingDebug = null;
+                        _selectedImageDebug = null;
                         _error = null;
                       });
                     },
@@ -642,6 +725,13 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
                 ? currentCopy.howItWorks
                 : currentCopy.voiceHowItWorks ?? currentCopy.howItWorks,
           ),
+          if (!voiceModeActive) ...[
+            const SizedBox(height: 16),
+            _InfoCard(
+              title: 'Capture tips',
+              body: currentCopy.imageGuidance,
+            ),
+          ],
           const SizedBox(height: 20),
           if (voiceModeActive) ...[
             FilledButton(
@@ -718,6 +808,18 @@ class _DemoFlowPageState extends State<DemoFlowPage> {
               child: _VoiceDebugCard(
                 debug: _recordingDebug!,
                 onPlay: _playRecordedAudio,
+              ),
+            ),
+          if (_selectedImageDebug != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: _ImageDebugCard(
+                debug: _selectedImageDebug!,
+                onSend: _isLoading ? null : _sendSelectedImage,
+                onShare: _isLoading ? null : _shareSelectedImage,
+                onRetake: _isLoading
+                    ? null
+                    : () => _captureOrPickImage(_selectedImageDebug!.source),
               ),
             ),
           if (_isLoading)
@@ -889,6 +991,8 @@ class DemoApiClient {
 }
 
 class ApiConfig {
+  static const String _androidDebugBaseUrl = 'http://127.0.0.1:8001';
+
   static String get baseUrl {
     if (kIsWeb) {
       return 'http://localhost:8001';
@@ -896,7 +1000,7 @@ class ApiConfig {
 
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
-        return 'http://10.0.2.2:8001';
+        return _androidDebugBaseUrl;
       default:
         return 'http://localhost:8001';
     }
@@ -1010,6 +1114,24 @@ class VoiceRecordingDebug {
   final int? bitsPerSample;
 }
 
+class SelectedImageDebug {
+  const SelectedImageDebug({
+    required this.filePath,
+    required this.fileName,
+    required this.contentType,
+    required this.byteLength,
+    required this.bytes,
+    required this.source,
+  });
+
+  final String filePath;
+  final String fileName;
+  final String contentType;
+  final int byteLength;
+  final Uint8List bytes;
+  final ImageSource source;
+}
+
 enum DemoInputMode {
   image,
   voice,
@@ -1041,6 +1163,8 @@ enum DemoCaptureType {
                 'We are starting with a sample note request so the app shell and backend contract are proven before camera capture is added.',
             howItWorks:
                 'The app sends a demo image payload to the public note endpoint and renders the response with success, review, or retry guidance.',
+            imageGuidance:
+                'Fill most of the frame with the note, keep the writing centered, avoid shadows across the page, and hold the phone steady until the text looks crisp.',
           ),
         DemoCaptureType.meter => const DemoCopy(
             stepLabel: 'Step 2 of 3: energy meter',
@@ -1048,6 +1172,8 @@ enum DemoCaptureType {
                 'This meter example is closer to the field workflow and shows how numeric extraction can come back with a result or a review-needed state.',
             howItWorks:
                 'The app sends the same demo payload shape to the public meter endpoint and prefers numeric output with retry guidance when confidence is low.',
+            imageGuidance:
+                'Move closer so the digits fill the frame, square the phone to the display, reduce glare, and make sure the full reading is visible before you send.',
             voiceHowItWorks:
                 'The voice path records microphone audio and sends it to the public meter voice endpoint. Transcript fallback buttons stay available for development and forced-state testing.',
           ),
@@ -1057,6 +1183,8 @@ enum DemoCaptureType {
                 'This serial example shows how equipment identifiers can be captured from labels and returned in a readable format without touching production records.',
             howItWorks:
                 'The app calls the public serial endpoint and renders either a clean identifier or an unreadable retry state depending on the sample used.',
+            imageGuidance:
+                'Keep the label flat in the frame, avoid angled shots, make the serial text large enough to read, and retake if glare or blur covers any characters.',
             voiceHowItWorks:
                 'The voice path records microphone audio and sends it to the public serial voice endpoint. Transcript fallback buttons stay available for development and forced-state testing.',
           ),
@@ -1124,12 +1252,14 @@ class DemoCopy {
     required this.stepLabel,
     required this.description,
     required this.howItWorks,
+    required this.imageGuidance,
     this.voiceHowItWorks,
   });
 
   final String stepLabel;
   final String description;
   final String howItWorks;
+  final String imageGuidance;
   final String? voiceHowItWorks;
 }
 
@@ -1321,6 +1451,85 @@ class _VoiceDebugCard extends StatelessWidget {
             debug.isTooSmall
                 ? 'Recording looks very small. Try speaking longer before stopping.'
                 : 'Recording size looks plausible for upload.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ImageDebugCard extends StatelessWidget {
+  const _ImageDebugCard({
+    required this.debug,
+    required this.onSend,
+    required this.onShare,
+    required this.onRetake,
+  });
+
+  final SelectedImageDebug debug;
+  final Future<void> Function()? onSend;
+  final Future<void> Function()? onShare;
+  final Future<void> Function()? onRetake;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sizeInMb = debug.byteLength / (1024 * 1024);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.lightBlue.shade50,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Image preview',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.memory(
+              debug.bytes,
+              height: 220,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text('File: ${debug.fileName}'),
+          Text('Content type: ${debug.contentType}'),
+          Text(
+            'Size: ${sizeInMb.toStringAsFixed(2)} MB (${debug.byteLength} bytes)',
+          ),
+          Text(
+            debug.source == ImageSource.camera
+                ? 'Source: live camera capture'
+                : 'Source: existing photo selection',
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: onSend == null ? null : () => onSend!.call(),
+            child: const Text('Send photo now'),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: onShare == null ? null : () => onShare!.call(),
+            child: const Text('Share image'),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: onRetake == null ? null : () => onRetake!.call(),
+            child: Text(
+              debug.source == ImageSource.camera
+                  ? 'Retake photo'
+                  : 'Choose another photo',
+            ),
           ),
         ],
       ),
