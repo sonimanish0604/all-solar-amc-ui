@@ -1,0 +1,189 @@
+name: Emit Teams Coordination Event
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_type:
+        description: Event type to post to the Teams coordination bot
+        required: true
+        type: choice
+        options:
+          - ui.decision_recorded
+          - ui.ready_for_development
+          - ui.blocked
+          - ui.review_requested
+          - ui.ready_for_demo
+          - coord.blocked_on_backend
+          - coord.dependency_clarified
+          - coord.ready_for_backend
+          - coord.escalation_required
+      source_issue:
+        description: Source issue reference, for example all-solar-amc-ui#42
+        required: true
+        type: string
+      source_role:
+        description: Role emitting the update
+        required: true
+        default: UI Coordinator
+        type: string
+      status:
+        description: Short status value shown in Teams
+        required: true
+        type: string
+      summary:
+        description: High-signal summary for the Teams post
+        required: true
+        type: string
+      owner:
+        description: Current owner of the next action
+        required: true
+        type: string
+      next_action:
+        description: What should happen next
+        required: true
+        type: string
+      github_url:
+        description: Optional absolute GitHub URL. Leave blank to infer from source_issue.
+        required: false
+        default: ""
+        type: string
+      target_repo:
+        description: Required for coord.* events, for example neilsolaramc
+        required: false
+        default: ""
+        type: string
+      target_issue:
+        description: Optional target issue reference, for example neilsolaramc#188
+        required: false
+        default: ""
+        type: string
+      target_role:
+        description: Required for coord.* events, for example Backend PM
+        required: false
+        default: ""
+        type: string
+      dependency_type:
+        description: Optional dependency type, for example API contract
+        required: false
+        default: ""
+        type: string
+      correlation_id:
+        description: Optional correlation id to thread related events
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  emit:
+    runs-on: ubuntu-latest
+    env:
+      BOT_EVENTS_URL: https://bot.aegis-saas.com/api/events
+      BOT_SHARED_TOKEN: ${{ secrets.TEAMS_BOT_SHARED_TOKEN }}
+    steps:
+      - name: Validate workflow configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${BOT_SHARED_TOKEN}" ]]; then
+            echo "Missing repository secret TEAMS_BOT_SHARED_TOKEN."
+            exit 1
+          fi
+
+          if [[ "${{ inputs.event_type }}" == coord.* ]]; then
+            if [[ -z "${{ inputs.target_repo }}" ]]; then
+              echo "target_repo is required for coord.* events."
+              exit 1
+            fi
+            if [[ -z "${{ inputs.target_role }}" ]]; then
+              echo "target_role is required for coord.* events."
+              exit 1
+            fi
+          fi
+
+      - name: Build event payload
+        id: payload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          github_url="${{ inputs.github_url }}"
+          if [[ -z "${github_url}" ]]; then
+            issue_ref="${{ inputs.source_issue }}"
+            issue_number=""
+            if [[ "${issue_ref}" =~ ^#?([0-9]+)$ ]]; then
+              issue_number="${BASH_REMATCH[1]}"
+            elif [[ "${issue_ref}" =~ ^[^#]+#([0-9]+)$ ]]; then
+              issue_number="${BASH_REMATCH[1]}"
+            fi
+
+            if [[ -n "${issue_number}" ]]; then
+              github_url="${{ github.server_url }}/${{ github.repository }}/issues/${issue_number}"
+            else
+              github_url="${{ github.server_url }}/${{ github.repository }}/issues"
+            fi
+          fi
+
+          payload="$(jq -n \
+            --arg event_type "${{ inputs.event_type }}" \
+            --arg source_repo "${{ github.repository }}" \
+            --arg source_issue "${{ inputs.source_issue }}" \
+            --arg source_role "${{ inputs.source_role }}" \
+            --arg status "${{ inputs.status }}" \
+            --arg summary "${{ inputs.summary }}" \
+            --arg owner "${{ inputs.owner }}" \
+            --arg next_action "${{ inputs.next_action }}" \
+            --arg github_url "${github_url}" \
+            --arg target_repo "${{ inputs.target_repo }}" \
+            --arg target_issue "${{ inputs.target_issue }}" \
+            --arg target_role "${{ inputs.target_role }}" \
+            --arg dependency_type "${{ inputs.dependency_type }}" \
+            --arg correlation_id "${{ inputs.correlation_id }}" \
+            '{
+              event_type: $event_type,
+              source_repo: $source_repo,
+              source_issue: $source_issue,
+              source_role: $source_role,
+              status: $status,
+              summary: $summary,
+              owner: $owner,
+              next_action: $next_action,
+              github_url: $github_url
+            }
+            + (if $target_repo != "" then {target_repo: $target_repo} else {} end)
+            + (if $target_issue != "" then {target_issue: $target_issue} else {} end)
+            + (if $target_role != "" then {target_role: $target_role} else {} end)
+            + (if $dependency_type != "" then {dependency_type: $dependency_type} else {} end)
+            + (if $correlation_id != "" then {correlation_id: $correlation_id} else {} end)')"
+
+          payload_file="${RUNNER_TEMP}/teams-event.json"
+          printf '%s\n' "${payload}" > "${payload_file}"
+
+          echo "payload_file=${payload_file}" >> "${GITHUB_OUTPUT}"
+
+          echo "Payload prepared:"
+          jq . "${payload_file}"
+
+      - name: Post event to Teams coordination bot
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          http_code="$(
+            curl --silent --show-error --output response.json --write-out "%{http_code}" \
+              -X POST "${BOT_EVENTS_URL}" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${BOT_SHARED_TOKEN}" \
+              --data "@${{ steps.payload.outputs.payload_file }}"
+          )"
+
+          cat response.json
+
+          if [[ "${http_code}" -lt 200 || "${http_code}" -ge 300 ]]; then
+            echo
+            echo "Teams bot request failed with HTTP ${http_code}."
+            exit 1
+          fi
