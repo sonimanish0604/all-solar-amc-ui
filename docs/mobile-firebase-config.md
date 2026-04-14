@@ -2,6 +2,12 @@
 
 This repo keeps generated Firebase client configuration out of Git and materializes it only on developer machines or in CI from environment secrets.
 
+Important policy note:
+
+- Firebase mobile client config is treated as public client-side build input, not as a backend secret.
+- Even so, this repo intentionally keeps the generated files out of Git so standard secret scanning and security-enforcement workflows remain deterministic and low-noise.
+- Real protection still comes from Firebase Rules, App Check, Android/iOS app identity, backend authorization, and never committing privileged credentials.
+
 Files kept out of source control:
 
 - `apps/mobile_app/android/app/google-services.json`
