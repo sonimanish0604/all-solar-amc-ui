@@ -11,4 +11,8 @@ Suggested topics for this repo:
 - design tokens and component conventions
 - app release checklist for Android and iOS
 
+Reference documents:
+
+- `MVP_SCOPE_AND_RELEASE_READINESS.md` - founder-level MVP scope, roadmap, and Android/iOS release readiness reference
+
 Canonical product and backend architecture details currently live in the backend repository. Copy only the UI-relevant decisions here when they become implementation constraints for this repo.

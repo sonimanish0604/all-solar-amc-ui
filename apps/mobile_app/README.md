@@ -7,7 +7,7 @@ Current state:
 - Standard Flutter scaffold created locally
 - Intended home for FlutterFlow-exported code and hand-written app code
 - Feature work should start from short-lived branches and merge into `develop`
-- Firebase client config is materialized locally/CI from environment secrets and is not kept in Git
+- Firebase client config is materialized locally/CI from environment secrets and is not kept in Git, even though it is public client-side build input
 
 Next recommended setup steps:
 
