@@ -44,5 +44,11 @@ coverage/
 .env.*
 !.env.example
 
+# Firebase client config generated outside Git
+apps/mobile_app/android/app/google-services.json
+apps/mobile_app/ios/Runner/GoogleService-Info.plist
+apps/mobile_app/lib/firebase_options.dart
+apps/mobile_app/firebase.json
+
 # Windows metadata
 *:Zone.Identifier

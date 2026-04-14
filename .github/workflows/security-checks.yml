@@ -26,3 +26,23 @@ jobs:
             echo 'Do not commit runtime env files.'
             exit 1
           fi
+
+      - name: Block committed Firebase client config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          blocked_paths=(
+            "apps/mobile_app/android/app/google-services.json"
+            "apps/mobile_app/ios/Runner/GoogleService-Info.plist"
+            "apps/mobile_app/lib/firebase_options.dart"
+            "apps/mobile_app/firebase.json"
+          )
+
+          for path in "${blocked_paths[@]}"; do
+            if git cat-file -e "HEAD:$path" 2>/dev/null; then
+              echo "Do not commit Firebase client configuration: $path"
+              echo "Materialize it locally or in CI from environment secrets instead."
+              exit 1
+            fi
+          done
